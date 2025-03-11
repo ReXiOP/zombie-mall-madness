@@ -1,162 +1,177 @@
 import Phaser from 'phaser';
+import io from 'socket.io-client';
 
 class GameScene extends Phaser.Scene {
   constructor() {
     super("GameScene");
+    this.socket = io(); // Connect to the server
     this.players = {};
-    this.ammo = 30; // Initial ammo
-    this.health = 100; // Player's initial health
-    this.score = 0; // Initial score
+    this.ammo = 30;
+    this.health = 100;
+    this.score = 0;
     this.zombies = [];
+    this.joystick = null;
   }
 
   preload() {
-    // Load assets
-    this.load.image('background', 'assets/back.png');
     this.load.image("player", "assets/player.png");
     this.load.image("zombie", "assets/zombie.png");
     this.load.image("bullet", "assets/bullet.png");
-    this.load.image("ammoBox", "assets/ammoBox.png"); // Load ammo box image
+    this.load.image("ammoBox", "assets/ammoBox.png");
+    this.load.image("joystickBase", "assets/joystickBase.png");
+    this.load.image("joystickThumb", "assets/joystickThumb.png");
+    this.load.image("shootButton", "assets/shootButton.png");
   }
 
   create() {
-    this.add.image(0, 0, 'background').setOrigin(0, 0).setDisplaySize(this.scale.width, this.scale.height);
-    // Create player sprite and set size
-    this.player = this.physics.add.sprite(400, 300, "player").setOrigin(0.5, 0.5);
-    this.player.setDisplaySize(40, 40); // Set player size to 40px
-    this.player.setCollideWorldBounds(true); // Ensure the player stays inside the game world
-    this.player.body.setGravityY(0); // Disable gravity to prevent player from falling
+    this.scale.resize(window.innerWidth, window.innerHeight);
+    this.scale.fullScreenScaleMode = Phaser.Scale.FIT;
+    this.scale.refresh();
 
-    this.cursors = this.input.keyboard.createCursorKeys(); // Handle player movement with arrow keys
+    // 🟢 Ensure physics is enabled for the player
+    this.player = this.physics.add.sprite(this.scale.width / 2, this.scale.height / 2, "player")
+      .setOrigin(0.5, 0.5)
+      .setDisplaySize(40, 40);
+    this.player.setCollideWorldBounds(true);
 
-    // Display texts
-    this.ammoText = this.add.text(10, 10, `Ammo: ${this.ammo}`, {
-      font: "16px Arial",
-      fill: "#fff",
-    });
+    this.cursors = this.input.keyboard.createCursorKeys();
 
-    this.healthText = this.add.text(10, 30, `Health: ${this.health}`, {
-      font: "16px Arial",
-      fill: "#fff",
-    });
+    this.ammoText = this.add.text(10, 10, `Ammo: ${this.ammo}`, { font: "16px Arial", fill: "#fff" });
+    this.healthText = this.add.text(10, 30, `Health: ${this.health}`, { font: "16px Arial", fill: "#fff" });
+    this.scoreText = this.add.text(10, 50, `Score: ${this.score}`, { font: "16px Arial", fill: "#fff" });
 
-    this.scoreText = this.add.text(10, 50, `Score: ${this.score}`, {
-      font: "16px Arial",
-      fill: "#fff",
-    });
-
-    // Create zombie group
     this.zombieGroup = this.physics.add.group();
-    this.createZombies(5); // Create 5 initial zombies
+    this.createZombies(5); // 🟢 Zombies should spawn properly
 
-    // Create ammo box group
     this.ammoBoxes = this.physics.add.group();
-    this.createAmmoBox(); // Create ammo box at random position
+    this.createAmmoBox();
 
-    // Collisions
     this.physics.add.collider(this.player, this.zombieGroup, this.playerHit, null, this);
-    this.physics.add.collider(this.player, this.ammoBoxes, this.collectAmmo, null, this); // Ammo box interaction
+    this.physics.add.collider(this.player, this.ammoBoxes, this.collectAmmo, null, this);
 
-    // Shoot on mouse left click
     this.input.on("pointerdown", this.shoot, this);
+
+    if (!this.sys.game.device.os.desktop) {
+      this.addTouchControls();
+    }
+
+    this.socket.on("playerPosition", (data) => {
+      if (!this.players[data.id]) {
+        this.players[data.id] = this.physics.add.sprite(data.x, data.y, "player").setDisplaySize(40, 40);
+      } else {
+        this.players[data.id].setPosition(data.x, data.y);
+      }
+    });
   }
 
   update() {
-    // Player movement with cursor keys, only move if a key is pressed
-    if (this.cursors.left.isDown) {
-      this.player.setVelocityX(-160); // Move left
-    } else if (this.cursors.right.isDown) {
-      this.player.setVelocityX(160); // Move right
-    } else {
-      this.player.setVelocityX(0); // Stop movement in X axis when no key is pressed
+    let velocityX = 0;
+    let velocityY = 0;
+
+    // 🟢 Ensure player movement is updated
+    if (this.cursors.left.isDown) velocityX = -160;
+    else if (this.cursors.right.isDown) velocityX = 160;
+
+    if (this.cursors.up.isDown) velocityY = -160;
+    else if (this.cursors.down.isDown) velocityY = 160;
+
+    // 🟢 Mobile joystick movement
+    if (this.joystick) {
+      let speed = 160;
+      velocityX = this.joystick.forceX * speed;
+      velocityY = this.joystick.forceY * speed;
     }
 
-    if (this.cursors.up.isDown) {
-      this.player.setVelocityY(-160); // Move up
-    } else if (this.cursors.down.isDown) {
-      this.player.setVelocityY(160); // Move down
-    } else {
-      this.player.setVelocityY(0); // Stop movement in Y axis when no key is pressed
-    }
+    this.player.setVelocity(velocityX, velocityY);
 
-    // Zombies movement towards player
+    // 🟢 Zombies should move toward the player
     this.zombieGroup.getChildren().forEach((zombie) => {
-      this.physics.moveToObject(zombie, this.player, 40); // Zombies move towards player with speed 40
+      this.physics.moveToObject(zombie, this.player, 40);
     });
 
-    // Update ammo, health, and score display
     this.ammoText.setText(`Ammo: ${this.ammo}`);
     this.healthText.setText(`Health: ${this.health}`);
     this.scoreText.setText(`Score: ${this.score}`);
+
+    this.socket.emit("playerPosition", {
+      id: this.socket.id,
+      x: this.player.x,
+      y: this.player.y,
+    });
   }
 
+  // 🟢 Ensure zombies spawn properly
   createZombies(count) {
     for (let i = 0; i < count; i++) {
-      let x = Phaser.Math.Between(100, 700);
-      let y = Phaser.Math.Between(100, 500);
-      let zombie = this.physics.add.sprite(x, y, "zombie").setOrigin(0.5, 0.5);
-      zombie.setDisplaySize(40, 40); // Set zombie size to 40px
-      zombie.setCollideWorldBounds(true); // Prevent zombies from going out of bounds
+      let x = Phaser.Math.Between(100, this.scale.width - 100);
+      let y = Phaser.Math.Between(100, this.scale.height - 100);
+      let zombie = this.physics.add.sprite(x, y, "zombie").setDisplaySize(40, 40);
       this.zombieGroup.add(zombie);
     }
   }
 
   createAmmoBox() {
-    // Spawn ammo box at random position
-    let x = Phaser.Math.Between(100, 700);
-    let y = Phaser.Math.Between(100, 500);
-    let ammoBox = this.physics.add.sprite(x, y, "ammoBox").setOrigin(0.5, 0.5);
-    ammoBox.setDisplaySize(40, 40); // Set ammo box size to 40px
+    let x = Phaser.Math.Between(100, this.scale.width - 100);
+    let y = Phaser.Math.Between(100, this.scale.height - 100);
+    let ammoBox = this.physics.add.sprite(x, y, "ammoBox").setDisplaySize(40, 40);
     this.ammoBoxes.add(ammoBox);
   }
 
   shoot() {
-    if (this.ammo <= 0) {
-      console.log("No ammo left!");
-      return; // Do nothing if ammo is 0
-    }
-
-    // Create bullet and set size
-    let bullet = this.physics.add.sprite(this.player.x, this.player.y, "bullet").setOrigin(0.5, 0.5);
-    bullet.setDisplaySize(20, 20); // Set bullet size to 20px
-    this.physics.moveTo(bullet, this.input.x, this.input.y, 500); // Move the bullet toward the mouse pointer
-
-    // Decrease ammo
+    if (this.ammo <= 0) return;
+    let bullet = this.physics.add.sprite(this.player.x, this.player.y, "bullet").setDisplaySize(20, 20);
+    this.physics.moveTo(bullet, this.input.x, this.input.y, 500);
     this.ammo -= 1;
-
-    // Check bullet collisions with zombies
     this.physics.add.collider(bullet, this.zombieGroup, this.killZombie, null, this);
   }
 
   killZombie(bullet, zombie) {
-    bullet.destroy(); // Destroy the bullet
-    zombie.destroy(); // Destroy the zombie
-    this.score += 10; // Increase score when zombie is killed
-    this.createZombies(1); // Create a new zombie
+    bullet.destroy();
+    zombie.destroy();
+    this.score += 10;
+    this.createZombies(1);
   }
 
   playerHit(player, zombie) {
-    this.health -= 10; // Decrease health when zombie hits player
-    zombie.destroy(); // Destroy zombie when it hits player
-    this.createZombies(1); // Create a new zombie
-    if (this.health <= 0) {
-      this.gameOver();
-    }
+    this.health -= 10;
+    zombie.destroy();
+    this.createZombies(1);
+    if (this.health <= 0) this.gameOver();
   }
 
   collectAmmo(player, ammoBox) {
-    ammoBox.destroy(); // Destroy the ammo box after interaction
-    this.ammo += 10; // Increase ammo
-    this.createAmmoBox(); // Spawn a new ammo box
+    ammoBox.destroy();
+    this.ammo += 10;
+    this.createAmmoBox();
   }
 
   gameOver() {
-    // Handle game over logic (can add more here)
     this.scene.pause();
-    this.add.text(200, 250, "Game Over", {
-      font: "32px Arial",
-      fill: "#ff0000",
+    this.add.text(this.scale.width / 2 - 50, this.scale.height / 2, "Game Over", { font: "32px Arial", fill: "#ff0000" });
+  }
+
+  addTouchControls() {
+    this.joystickBase = this.add.sprite(100, this.scale.height - 100, "joystickBase").setOrigin(0.5);
+    this.joystickThumb = this.add.sprite(100, this.scale.height - 100, "joystickThumb").setOrigin(0.5);
+    this.shootButton = this.add.sprite(this.scale.width - 80, this.scale.height - 80, "shootButton").setInteractive();
+
+    this.joystickBase.setScale(1.5);
+    this.joystickThumb.setScale(1.5);
+    this.shootButton.setScale(0.8);
+
+    this.joystickBase.alpha = 0.7;
+    this.joystickThumb.alpha = 0.7;
+    this.shootButton.alpha = 0.8;
+
+    this.joystick = this.plugins.get('rexVirtualJoystick').add(this, {
+      x: 100,
+      y: this.scale.height - 100,
+      radius: 50,
+      base: this.joystickBase,
+      thumb: this.joystickThumb,
     });
+
+    this.shootButton.on("pointerdown", () => this.shoot());
   }
 }
 
