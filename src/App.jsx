@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import GameWrapper from './game/GameWrapper'; // Import the GameWrapper component
 import LandingPage from './game/LandingPage';
+import AboutPage  from './game/about';
 
 const App = () => {
   const [gameStarted, setGameStarted] = useState(false);
