@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import './LandingPage.css'; // Make sure to create a separate CSS file for styling
-import AboutPage from './About';
+import AboutPage from './about.jsx';
 
 const LandingPage = ({ startGame }) => {
   const [showPopup, setShowPopup] = useState(false);
